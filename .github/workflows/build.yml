@@ -29,7 +29,7 @@
           uses: docker/build-push-action@v4
           with:
             context: .
-            dockerfile: Dockerfile
+            file: Dockerfile
             push: false
             tags: ${{ secrets.DOCKER_HUB_USERNAME }}/hello-api:latest
 
