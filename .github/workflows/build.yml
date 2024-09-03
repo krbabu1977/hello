@@ -13,7 +13,11 @@
       env:
         USERNAME: ${{ secrets.DOCKER_HUB_USERNAME }}
         PASSWORD: ${{ secrets.DOCKER_HUB_ACCESS_TOKEN }}
+      
       steps:
+        - name: Read secrects
+          run: echo "USERNAME and PASSWORD values in the dev job is $USERNAME and $PASSWORD"
+          
         - name: Checkout repository
           uses: actions/checkout@v4
 
