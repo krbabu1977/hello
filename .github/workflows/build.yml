@@ -9,7 +9,6 @@
     build-deploy:
       name: Build and Deploy Spring Boot API
       runs-on: ubuntu-latest
-      environment: dev
       env:
         USERNAME: ${{ secrets.DOCKER_HUB_USERNAME }}
         PASSWORD: ${{ secrets.DOCKER_HUB_ACCESS_TOKEN }}
