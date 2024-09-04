@@ -4,10 +4,13 @@
 name: Spring Boot CI with Maven
 
 on:
+  workflow_dispatch:
+    branches: [ "main" ]
   push:
-    branches: [ "master" ]
+    branches: [ "main" ]
   pull_request:
-    branches: [ "master" ]
+    branches: [ "main" ]
+
 
 jobs:
   build:
