@@ -10,6 +10,10 @@ on:
         description: 'Name of the image'
         required: true
         type: string
+      containerName:
+        description: 'Name of the container'
+        required: true
+        type: string     
       environment:
         description: 'Environment to run tests against'
         type: environment
@@ -55,14 +59,14 @@ jobs:
         context: .
         file: ./Dockerfile
         push: true
-        tags: ${{ secrets.DOCKER_HUB_USERNAME }}/spring-boot-github-action-demo:latest
+        tags: ${{ secrets.DOCKER_HUB_USERNAME }}/${{ inputs.imageName }}:latest
   deploy:
     needs: build
     runs-on: [aws-ec2]
     steps:
       - name: Pull Image from docker hub
-        run: sudo docker pull ${{ secrets.DOCKER_HUB_USERNAME }}/spring-boot-github-action-demo:latest
+        run: sudo docker pull ${{ secrets.DOCKER_HUB_USERNAME }}/${{ inputs.imageName }}:latest
       - name: Delete old container
-        run: sudo docker rm -f spring-boot-app-container
+        run: sudo docker rm -f ${{ inputs.containerName }}
       - name: Run Docker Image
-        run: sudo docker run -d -p 8080:8080 --name spring-boot-app-container ${{ secrets.DOCKERHUB_USERNAME }}/spring-boot-github-action-demo
+        run: sudo docker run -d -p 8080:8080 --name ${{ inputs.containerName }} ${{ secrets.DOCKERHUB_USERNAME }}/${{ inputs.imageName }}
