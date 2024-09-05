@@ -1,72 +1,101 @@
-# This workflow will build a Java project with Maven, and cache/restore any dependencies to improve the workflow execution time
-# For more information see: https://docs.github.com/en/actions/automating-builds-and-tests/building-and-testing-java-with-maven
-
-name: Spring Boot CI with Maven
+name: CI/CD
 
 on:
   workflow_dispatch:
     inputs:
       imageName:
-        description: 'Name of the image'
+        description: 'Image name'
         required: true
         type: string
-      containerName:
-        description: 'Name of the container'
+      imageVersion:
+        description: 'Image Version'
         required: true
-        type: string     
-      environment:
-        description: 'Environment to run tests against'
-        type: environment
+        type: string
+      clusterName:
+        description: 'Cluster name'
         required: true
+        type: string                
   push:
-    branches: [ "main" ]
-  pull_request:
-    branches: [ "main" ]
+    branches:
+      - main
 
 jobs:
   build:
-
     runs-on: ubuntu-latest
 
     steps:
-    - uses: actions/checkout@v4
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
     - name: Set up JDK 17
       uses: actions/setup-java@v4
       with:
-        java-version: '17'
+        java-version: 17
         distribution: 'temurin'
-        cache: maven
-    - name: Build with Maven
-      run: |
-           mvn clean install
-           mkdir artifacts && cp target/*.jar artifacts
-           cd artifacts && ls
-    - name: Save artifact
+
+    - name: Cache Maven packages
+      uses: actions/cache@v4
+      with:
+        path: ~/.m2
+        key: ${{ runner.os }}-m2-${{ hashFiles('**/pom.xml') }}
+        restore-keys: ${{ runner.os }}-m2
+
+    - name: Build and test with Maven
+      run: mvn --batch-mode --update-snapshots --no-transfer-progress clean package
+
+    - name: Upload JAR file
       uses: actions/upload-artifact@v4
       with:
-        name: github-action-artifact
-        path: artifacts
-    - name: Login to Docker Hub
-      uses: docker/login-action@v3
-      with:
-        username: ${{ secrets.DOCKER_HUB_USERNAME }}
-        password: ${{ secrets.DOCKER_HUB_ACCESS_TOKEN }}
-    - name: Set up Docker Buildx
-      uses: docker/setup-buildx-action@v3
-    - name: Build and push
-      uses: docker/build-push-action@v5
-      with:
-        context: .
-        file: ./Dockerfile
-        push: true
-        tags: ${{ secrets.DOCKER_HUB_USERNAME }}/${{ inputs.imageName }}:latest
+        name: app-jar
+        path: target/*.jar
+      
   deploy:
     needs: build
-    runs-on: [aws-ec2]
+    runs-on: ubuntu-latest
+
     steps:
-      - name: Pull Image from docker hub
-        run: sudo docker pull ${{ secrets.DOCKER_HUB_USERNAME }}/${{ inputs.imageName }}:latest
-      - name: Delete old container
-        run: sudo docker rm -f ${{ inputs.containerName }}
-      - name: Run Docker Image
-        run: sudo docker run -d -p 8080:8080 --name ${{ inputs.containerName }} ${{ secrets.DOCKERHUB_USERNAME }}/${{ inputs.imageName }}
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: 17
+          distribution: 'temurin'
+
+      - name: Download JAR file
+        uses: actions/download-artifact@v4
+        with:
+          name: app-jar
+          path: target
+
+      - name: Build Docker image
+        run: docker build -t ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com/${{ inputs.imageName }} .
+
+      - name: Install and configure AWS CLI
+        run: |
+          curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
+          unzip -q awscliv2.zip
+          sudo ./aws/install --update
+          aws configure set aws_access_key_id ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws configure set aws_secret_access_key ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws configure set default.region ${{ secrets.AWS_REGION }}
+
+      - name: Login to ECR
+        run: |
+          aws ecr get-login-password --region ${{ secrets.AWS_REGION }} | docker login --username AWS --password-stdin ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com
+
+      - name: Tag and push Docker image
+        run: |
+          docker tag ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com/${{ inputs.imageName }}:latest ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com/${{ inputs.imageName }}:${GITHUB_SHA}
+          docker push ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com/${{ inputs.imageName }}:${GITHUB_SHA}
+
+      - name: Deploy to EKS
+        run: |
+          aws eks update-kubeconfig --region ${{ secrets.AWS_REGION }} --name ${{ inputs.clusterName }}
+          mkdir -p k8s
+          export ECR_REPOSITORY_URL="${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com/${{ inputs.imageName }}:${GITHUB_SHA}"
+          envsubst < k8s-deployment.yaml > k8s/k8s-deployment.yaml
+          echo "resources:" > k8s/kustomization.yaml
+          echo "- k8s-deployment.yaml" >> k8s/kustomization.yaml
+          kubectl kustomize k8s | kubectl apply -f - --force
